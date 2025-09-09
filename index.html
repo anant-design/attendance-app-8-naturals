@@ -1,0 +1,187 @@
+<!-- index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>8 Naturals Attendance</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f3f6f9}
+    .card{width:420px;background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(20,30,50,0.08);padding:18px}
+    h2{margin:0 0 8px;font-size:20px}
+    label{display:block;margin-top:10px;font-size:13px;color:#333}
+    input[type=text]{width:100%;padding:10px;border-radius:8px;border:1px solid #e2e8f0;margin-top:6px;box-sizing:border-box}
+    .row{display:flex;gap:8px}
+    .camera{margin-top:12px;background:#eef2ff;padding:10px;border-radius:8px;text-align:center}
+    video{width:100%;height:220px;border-radius:8px;background:#000;object-fit:cover}
+    canvas{display:none}
+    .controls{display:flex;gap:8px;margin-top:8px}
+    button, .toggle-btn{cursor:pointer;padding:10px 12px;border-radius:10px;border:0;font-weight:600}
+    button.primary{background:#1e88e5;color:white}
+    button.ghost{background:transparent;border:1px solid #cbd5e1}
+    .toggle-row{display:flex;gap:8px;margin-top:10px}
+    .toggle-btn{flex:1;background:#f1f5f9;border:1px solid #e2e8f0;text-align:center;line-height:28px}
+    .toggle-btn.active{background:#1e88e5;color:white}
+    .small{font-size:12px;color:#666;margin-top:6px}
+    .footer{margin-top:12px;font-size:12px;color:#666;text-align:center}
+    .status{margin-top:8px;font-size:13px}
+    .muted{color:#999;font-size:12px}
+    .location-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .readonly{background:#f8fafc}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>8 Naturals — Attendance</h2>
+    <div class="muted">Camera-only photo. Click <strong>Get Location</strong> if you want to attach geo (optional).</div>
+
+    <label>Employee Name</label>
+    <input id="employeeName" type="text" placeholder="e.g. Ravi Kumar" autocomplete="off" />
+
+    <label>Site Name</label>
+    <input id="siteName" type="text" placeholder="e.g. Nursery - Pune" autocomplete="off" />
+
+    <label>Entry Type</label>
+    <div class="toggle-row">
+      <div id="btnIn" class="toggle-btn" role="button">IN</div>
+      <div id="btnOut" class="toggle-btn" role="button">OUT</div>
+    </div>
+
+    <label>Location (optional)</label>
+    <div class="location-row">
+      <input id="locationField" class="readonly" type="text" placeholder="Click Get Location" readonly />
+      <button id="getLocationBtn" class="ghost" type="button">Get Location</button>
+    </div>
+    <div class="small">Press <strong>Get Location</strong> to allow location permission and store lat,lon.</div>
+
+    <div class="camera">
+      <div class="small">Camera (front/back depends on device). Allow camera permission when prompted.</div>
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div class="controls">
+        <button id="captureBtn" class="primary">Capture & Submit</button>
+        <button id="retryBtn" class="ghost" type="button">Retry Camera</button>
+      </div>
+      <div class="small">Timestamp recorded on submit. If you didn't click Get Location, location will remain blank.</div>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="footer">Built for <strong>8 Naturals</strong></div>
+  </div>
+
+  <script>
+    // client-side script uses google.script.run to call processAttendance on server
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const captureBtn = document.getElementById('captureBtn');
+    const retryBtn = document.getElementById('retryBtn');
+    const status = document.getElementById('status');
+    const btnIn = document.getElementById('btnIn');
+    const btnOut = document.getElementById('btnOut');
+    const getLocationBtn = document.getElementById('getLocationBtn');
+    const locationField = document.getElementById('locationField');
+
+    let selectedEntryType = null;
+    let stream = null;
+    let savedLocation = null;
+    let videoReady = false;
+
+    function setStatus(msg, error=false){
+      status.textContent = msg;
+      status.style.color = error ? 'crimson' : '#333';
+    }
+
+    [btnIn, btnOut].forEach(b => b.addEventListener('click', ()=>{
+      btnIn.classList.remove('active'); btnOut.classList.remove('active');
+      b.classList.add('active');
+      selectedEntryType = b.textContent.trim();
+    }));
+
+    async function startCamera(){
+      stopCamera();
+      videoReady = false;
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}, audio: false});
+        video.srcObject = stream;
+        await new Promise((resolve)=>{
+          const timeout = setTimeout(()=>{ videoReady = true; resolve(); }, 2500);
+          video.onloadedmetadata = ()=>{ video.play(); videoReady = true; clearTimeout(timeout); resolve(); };
+        });
+        setStatus('Camera started — allow permission if prompted.');
+      }catch(err){
+        console.error('camera error', err);
+        setStatus('Could not access camera: ' + (err.message || err), true);
+      }
+    }
+
+    function stopCamera(){
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null; videoReady = false;
+      }
+    }
+    retryBtn.addEventListener('click', ()=> startCamera());
+
+    function capturePhoto(){
+      if(!videoReady) throw new Error('Video not ready');
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    }
+
+    getLocationBtn.addEventListener('click', ()=>{
+      if (!navigator.geolocation) { setStatus('Geolocation not supported by browser', true); return; }
+      setStatus('Requesting location permission...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          savedLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy };
+          locationField.value = savedLocation.lat.toFixed(6) + ', ' + savedLocation.lon.toFixed(6);
+          setStatus('Location captured ✅');
+        },
+        (err) => { console.error('geolocation error', err); setStatus('Failed to get location: ' + (err.message || err.code), true); },
+        { enableHighAccuracy: true, timeout: 20000 }
+      );
+    });
+
+    captureBtn.addEventListener('click', async ()=>{
+      setStatus('Preparing to capture...');
+      const name = document.getElementById('employeeName').value.trim();
+      const site = document.getElementById('siteName').value.trim();
+      if(!name || !site){ setStatus('Please fill Employee Name and Site Name.', true); return; }
+      if(!selectedEntryType){ setStatus('Please choose IN or OUT.', true); return; }
+
+      let photoData;
+      try{ photoData = capturePhoto(); }catch(err){ setStatus('Failed to capture photo. Try Retry Camera.', true); return; }
+
+      const timestamp = new Date().toISOString();
+      const payload = { employeeName: name, siteName: site, entryType: selectedEntryType, timestamp: timestamp, location: savedLocation, photo: photoData };
+
+      setStatus('Submitting — please wait...');
+      // Call server-side processAttendance via google.script.run
+      google.script.run.withSuccessHandler(function(resp){
+        if(resp && resp.status === 'OK'){
+          setStatus('Submitted successfully ✅');
+          // reset fields
+          document.getElementById('employeeName').value = '';
+          document.getElementById('siteName').value = '';
+          btnIn.classList.remove('active'); btnOut.classList.remove('active'); selectedEntryType = null;
+          savedLocation = null; locationField.value = '';
+        }else{
+          setStatus('Server error: ' + (resp && resp.message ? resp.message : 'Unknown'), true);
+        }
+      }).withFailureHandler(function(err){
+        console.error('server call failed', err);
+        setStatus('Server call failed: ' + (err.message || err), true);
+      }).processAttendance(payload);
+    });
+
+    // start camera on load
+    startCamera();
+    window.addEventListener('beforeunload', ()=>{ stopCamera(); });
+  </script>
+</body>
+</html>
